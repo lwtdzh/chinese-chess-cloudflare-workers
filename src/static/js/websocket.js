@@ -3,6 +3,7 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT = 10;
 let currentPlayerId = null;
 let currentRoomName = null;
+let isIntentionalClose = false; // Flag to prevent auto-reconnect on intentional closes
 
 // Cookie helper functions
 function setCookie(name, value, minutes) {
@@ -85,6 +86,7 @@ function connectWebSocket(roomName = null) {
 
         // Close existing connection if any
         if (webSocket && webSocket.readyState !== WebSocket.CLOSED) {
+            isIntentionalClose = true; // Mark as intentional to prevent auto-reconnect
             webSocket.close();
         }
 
@@ -93,10 +95,12 @@ function connectWebSocket(roomName = null) {
         webSocket.onopen = function() {
             console.log('WebSocket Connected');
             reconnectAttempts = 0;
+            isIntentionalClose = false; // Reset flag on successful connection
         };
 
         webSocket.onmessage = function(event) {
             const data = JSON.parse(event.data);
+            console.log('[WS] Received message:', data.type, data);
             handleServerMessage(data);
         };
 
@@ -105,11 +109,13 @@ function connectWebSocket(roomName = null) {
         };
 
         webSocket.onclose = function() {
-            console.log('WebSocket closed');
-            if (reconnectAttempts < MAX_RECONNECT) {
+            console.log('WebSocket closed, isIntentional:', isIntentionalClose);
+            // Only auto-reconnect if this wasn't an intentional close
+            if (!isIntentionalClose && reconnectAttempts < MAX_RECONNECT) {
                 reconnectAttempts++;
                 setTimeout(() => connectWebSocket(), 2000 * reconnectAttempts);
             }
+            isIntentionalClose = false; // Reset flag
         };
     } catch (error) {
         console.error('Failed to initialize WebSocket:', error);
@@ -157,6 +163,7 @@ function sendRejoin(roomName) {
 }
 
 function sendMove(roomName, from, to) {
+    console.log('[WS] Sending move:', from, '->', to);
     sendMessage({
         type: 'move',
         roomId: roomName,

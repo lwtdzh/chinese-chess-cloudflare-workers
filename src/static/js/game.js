@@ -34,6 +34,7 @@ function handleServerMessage(data) {
             }
             break;
         case 'REJOINED':
+            console.log('[GAME] REJOINED received, board currentTurn:', data.currentTurn, 'gameState:', data.gameState);
             gameState.roomName = data.roomId;
             gameState.playerId = data.playerId;
             gameState.myColor = data.color;
@@ -58,7 +59,7 @@ function handleServerMessage(data) {
             updateTurnInfo();
             // Clear opponent disconnect status
             clearOpponentStatus();
-            console.log('Successfully rejoined game');
+            console.log('[GAME] Successfully rejoined game');
             break;
         case 'GAME_START':
             gameState.board = deserializeBoard(data.board);
@@ -75,6 +76,7 @@ function handleServerMessage(data) {
             AudioManager.startBackgroundMusic();
             break;
         case 'MOVE':
+            console.log('[GAME] MOVE received:', data.from, '->', data.to, 'nextTurn:', data.nextTurn);
             applyMove(data);
             break;
         case 'GAME_OVER':
@@ -147,6 +149,7 @@ function deserializeBoard(boardData) {
 }
 
 function applyMove(data) {
+    console.log('[GAME] applyMove called, piece at from:', gameState.board[data.from.row][data.from.col]);
     const piece = gameState.board[data.from.row][data.from.col];
     gameState.board[data.from.row][data.from.col] = null;
     gameState.board[data.to.row][data.to.col] = piece;
