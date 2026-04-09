@@ -42,17 +42,25 @@ export class GameRoomDO implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
-    if (url.pathname === '/ws') {
+    // Handle WebSocket upgrade
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (upgradeHeader && upgradeHeader === 'websocket') {
       return this.handleWebSocket(request);
     }
 
-    return new Response('Not Found', { status: 404 });
+    return new Response('Expected WebSocket', { status: 426 });
   }
 
   private async handleWebSocket(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const playerId = url.searchParams.get('playerId') || `player_${Date.now()}`;
     const roomName = url.searchParams.get('roomName') || '';
+
+    // Set room info if this is the first connection
+    if (!this.roomId && roomName) {
+      this.roomId = roomName;
+      this.roomName = roomName;
+    }
 
     // Create WebSocket pair
     const pair = new WebSocketPair();
@@ -64,15 +72,88 @@ export class GameRoomDO implements DurableObject {
     // Store connection
     this.connections.set(server, { webSocket: server, playerId });
 
-    // Handle incoming messages
-    server.addEventListener('message', (event: MessageEvent) => {
-      this.handleMessage(server, event.data as string);
-    });
+    console.log(`WebSocket connected: ${playerId} to room ${roomName}`);
 
-    // Handle close
-    server.addEventListener('close', () => {
-      this.connections.delete(server);
-    });
+    // Send connection confirmation
+    server.send(JSON.stringify({
+      type: 'CONNECTED',
+      playerId: playerId,
+      roomId: this.roomId
+    }));
+
+    // If this is a lobby connection (no room name yet), just keep connection open
+    if (!roomName || roomName === 'lobby_main') {
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    // If room exists and player is already in it, send current state
+    if (this.hasPlayer(playerId) && this.board) {
+      server.send(JSON.stringify({
+        type: 'REJOINED',
+        roomId: this.roomId,
+        playerId: playerId,
+        color: this.getPlayerColor(playerId),
+        board: this.board.serialize(),
+        currentTurn: this.board.currentTurn,
+        gameState: this.gameState,
+        chatHistory: this.chatMessages
+      }));
+    }
+    // If this is first player, auto-create room
+    else if (!this.redPlayerId && !this.blackPlayerId) {
+      this.redPlayerId = playerId;
+      this.board = new ChessBoard();
+      this.gameState = GameState.WAITING;
+      this.lastActivityTime = Date.now();
+
+      server.send(JSON.stringify({
+        type: 'ROOM_CREATED',
+        roomId: this.roomId,
+        roomName: this.roomName,
+        playerId: playerId,
+        color: 'RED'
+      }));
+    }
+    // If player is trying to join an existing room
+    else if (this.redPlayerId && !this.blackPlayerId && playerId !== this.redPlayerId) {
+      this.blackPlayerId = playerId;
+      this.lastActivityTime = Date.now();
+
+      server.send(JSON.stringify({
+        type: 'JOINED',
+        roomId: this.roomId,
+        playerId: playerId,
+        color: 'BLACK'
+      }));
+
+      // Start the game
+      if (this.board) {
+        this.gameState = GameState.PLAYING;
+
+        const startMsg: ServerMessage = {
+          type: 'GAME_START',
+          roomId: this.roomId,
+          board: this.board.serialize()
+        };
+
+        this.broadcast(startMsg);
+      }
+    }
+    // Room is full or player already in room
+    else if (this.redPlayerId === playerId) {
+      server.send(JSON.stringify({
+        type: 'JOINED',
+        roomId: this.roomId,
+        playerId: playerId,
+        color: 'RED'
+      }));
+    }
+    else {
+      server.send(JSON.stringify({
+        type: 'ERROR',
+        message: '房间已满'
+      }));
+    }
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -123,11 +204,23 @@ export class GameRoomDO implements DurableObject {
   }
 
   private handleCreateRoom(ws: WebSocket, name: string, playerId: string): void {
-    if (this.roomId) {
-      // Room already exists
+    if (this.roomId && this.redPlayerId && this.redPlayerId !== playerId) {
+      // Room already exists with different player
       this.sendToWebSocket(ws, {
         type: 'ERROR',
         message: '房间名已存在，请使用其他名称'
+      });
+      return;
+    }
+
+    // If player is already the red player, just confirm
+    if (this.redPlayerId === playerId) {
+      this.sendToWebSocket(ws, {
+        type: 'ROOM_CREATED',
+        roomId: this.roomId,
+        roomName: this.roomName,
+        playerId: playerId,
+        color: 'RED'
       });
       return;
     }
@@ -444,5 +537,22 @@ export class GameRoomDO implements DurableObject {
         console.error('Error broadcasting:', e);
       }
     }
+  }
+
+  // WebSocket Hibernation API handlers
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    if (typeof message === 'string') {
+      this.handleMessage(ws, message);
+    }
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    this.connections.delete(ws);
+    console.log(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
+  }
+
+  async webSocketError(ws: WebSocket, error: any): Promise<void> {
+    this.connections.delete(ws);
+    console.error(`WebSocket error:`, error);
   }
 }

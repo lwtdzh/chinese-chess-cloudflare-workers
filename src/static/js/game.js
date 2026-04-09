@@ -100,13 +100,19 @@ function handleServerMessage(data) {
             handleDrawRequest(data);
             break;
         case 'DRAW_DECLINED':
-            alert('对方拒绝了和棋请求');
+            // Only show alert to the player who requested the draw
+            if (data.playerId !== gameState.playerId) {
+                alert('对方拒绝了和棋请求');
+            }
             break;
         case 'TAKE_BACK_REQUEST':
             handleTakeBackRequest(data);
             break;
         case 'TAKE_BACK_DECLINED':
-            alert('对方拒绝了悔棋请求');
+            // Only show alert to the player who requested the take back
+            if (data.playerId !== gameState.playerId) {
+                alert('对方拒绝了悔棋请求');
+            }
             break;
         case 'TAKE_BACK':
             handleTakeBack(data);

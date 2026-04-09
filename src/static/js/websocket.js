@@ -52,29 +52,40 @@ function clearGameSession() {
     deleteCookie('xiangqi_room_name');
 }
 
-function connectWebSocket() {
-    console.log('Connecting to WebSocket at', CONFIG.WS_URL);
+function connectWebSocket(roomName = null) {
+    console.log('Connecting to WebSocket at', CONFIG.WS_URL, 'roomName:', roomName);
 
-    // Check if we have a saved session (for reconnection)
-    const savedPlayerId = getSavedPlayerIdFromCookie();
-    const savedRoomName = getSavedRoomNameFromCookie();
+    // Initialize player ID if not set
+    if (!currentPlayerId) {
+        const savedPlayerId = getSavedPlayerIdFromCookie();
+        const savedRoomName = getSavedRoomNameFromCookie();
 
-    if (savedPlayerId && savedRoomName) {
-        currentPlayerId = savedPlayerId;
-        currentRoomName = savedRoomName;
-        console.log('Found saved session, will attempt reconnection:', savedPlayerId, savedRoomName);
-    } else {
-        currentPlayerId = 'player_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        console.log('New session with playerId:', currentPlayerId);
+        if (savedPlayerId && savedRoomName) {
+            currentPlayerId = savedPlayerId;
+            currentRoomName = savedRoomName;
+            console.log('Found saved session:', savedPlayerId, savedRoomName);
+        } else {
+            currentPlayerId = 'player_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            console.log('New session with playerId:', currentPlayerId);
+        }
+    }
+
+    // If roomName is provided, use it
+    if (roomName) {
+        currentRoomName = roomName;
     }
 
     try {
-        // Build WebSocket URL with roomName parameter
+        // Build WebSocket URL
         let wsUrl = CONFIG.WS_URL;
+        wsUrl += '?playerId=' + encodeURIComponent(currentPlayerId);
         if (currentRoomName) {
-            wsUrl += '?roomName=' + encodeURIComponent(currentRoomName) + '&playerId=' + encodeURIComponent(currentPlayerId);
-        } else {
-            wsUrl += '?playerId=' + encodeURIComponent(currentPlayerId);
+            wsUrl += '&roomName=' + encodeURIComponent(currentRoomName);
+        }
+
+        // Close existing connection if any
+        if (webSocket && webSocket.readyState !== WebSocket.CLOSED) {
+            webSocket.close();
         }
 
         webSocket = new WebSocket(wsUrl);
@@ -82,12 +93,6 @@ function connectWebSocket() {
         webSocket.onopen = function() {
             console.log('WebSocket Connected');
             reconnectAttempts = 0;
-
-            // If we have a saved room, try to rejoin
-            if (currentRoomName) {
-                console.log('Attempting to rejoin room:', currentRoomName);
-                sendRejoin(currentRoomName);
-            }
         };
 
         webSocket.onmessage = function(event) {
@@ -130,21 +135,17 @@ function sendMessage(message) {
 }
 
 function sendCreateRoom(roomName) {
+    console.log('sendCreateRoom called:', roomName);
+    // Reconnect with the room name - server will auto-create the room
     currentRoomName = roomName;
-    sendMessage({
-        type: 'createRoom',
-        roomName: roomName,
-        playerId: currentPlayerId
-    });
+    connectWebSocket(roomName);
 }
 
 function sendJoinRoom(roomName) {
+    console.log('sendJoinRoom called:', roomName);
+    // Reconnect with the room name - server will handle joining
     currentRoomName = roomName;
-    sendMessage({
-        type: 'joinRoom',
-        roomId: roomName,
-        playerId: currentPlayerId
-    });
+    connectWebSocket(roomName);
 }
 
 function sendRejoin(roomName) {

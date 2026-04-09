@@ -12,6 +12,8 @@ new_sqlite_classes = ["GameRoomDO"]
 [assets]
 directory = "./src/static"
 
-[[routes]]
-pattern = "chess.netlib.re/*"
-zone_name = "chess.netlib.re"
+# Custom domain route (requires DNS configuration in Cloudflare dashboard)
+# Uncomment when DNS is properly configured:
+# [[routes]]
+# pattern = "chess.netlib.re/*"
+# zone_name = "chess.netlib.re"

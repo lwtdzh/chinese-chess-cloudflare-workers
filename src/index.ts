@@ -26,19 +26,12 @@ async function handleWebSocket(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const roomName = url.searchParams.get('roomName');
 
-  // If no roomName, we need to create one from the first connection
-  // For simplicity, we'll use a default room name or expect the client to provide one
-  if (!roomName) {
-    // Generate a random room name for initial connection
-    // The client will need to create/join a room after connecting
-    const defaultRoom = 'lobby_' + Date.now();
-    const id = env.GAME_ROOM.idFromName(defaultRoom);
-    const stub = env.GAME_ROOM.get(id);
-    return stub.fetch(request);
-  }
+  // If roomName is provided, route to that specific room's Durable Object
+  // If no roomName, use a shared "lobby" Durable Object
+  // The lobby DO will handle room creation and routing
 
-  // Get the Durable Object for this room
-  const id = env.GAME_ROOM.idFromName(roomName);
+  const targetRoom = roomName || 'lobby_main';
+  const id = env.GAME_ROOM.idFromName(targetRoom);
   const stub = env.GAME_ROOM.get(id);
 
   // Forward the request to the Durable Object
