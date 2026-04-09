@@ -88,6 +88,15 @@ export class GameRoomDO implements DurableObject {
 
     // If room exists and player is already in it, send current state
     if (this.hasPlayer(playerId) && this.board) {
+      // Broadcast OPPONENT_RECONNECTED to other players
+      const myColor = this.getPlayerColor(playerId);
+      if (myColor && this.gameState === GameState.PLAYING) {
+        this.broadcast({
+          type: 'OPPONENT_RECONNECTED',
+          playerColor: myColor
+        }, server); // Exclude the reconnecting player
+      }
+
       server.send(JSON.stringify({
         type: 'REJOINED',
         roomId: this.roomId,
@@ -528,9 +537,10 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private broadcast(message: ServerMessage): void {
+  private broadcast(message: ServerMessage, excludeWs?: WebSocket): void {
     const data = JSON.stringify(message);
     for (const [ws] of this.connections) {
+      if (ws === excludeWs) continue;
       try {
         ws.send(data);
       } catch (e) {
@@ -547,7 +557,22 @@ export class GameRoomDO implements DurableObject {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    const connection = this.connections.get(ws);
     this.connections.delete(ws);
+
+    // Notify opponent of disconnect
+    if (connection && this.gameState === GameState.PLAYING) {
+      const playerId = connection.playerId;
+      const playerColor = this.getPlayerColor(playerId);
+      if (playerColor) {
+        // Broadcast to remaining connections
+        this.broadcast({
+          type: 'OPPONENT_DISCONNECTED',
+          playerColor: playerColor
+        });
+      }
+    }
+
     console.log(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
   }
 

@@ -96,6 +96,12 @@ button:hover {
     font-size: 12px;
 }
 
+.disconnect-status {
+    background: #ff9800;
+    color: white;
+    font-weight: bold;
+}
+
 canvas {
     border: 1px solid #333;
     background: #f0d9b5;

@@ -42,7 +42,12 @@ function handleServerMessage(data) {
             gameState.isPlaying = data.gameState === 'PLAYING';
             // Save session again
             saveGameSession(gameState.playerId, gameState.roomName);
-            document.getElementById('roomInfo').textContent = `房间: ${data.roomId} (已重连)`;
+            // Show proper room info based on game state
+            if (data.gameState === 'PLAYING') {
+                document.getElementById('roomInfo').textContent = `房间: ${data.roomId}`;
+            } else {
+                document.getElementById('roomInfo').textContent = `房间: ${data.roomId} (等待对手加入)`;
+            }
             document.getElementById('lobby').style.display = 'none';
             document.getElementById('game').style.display = 'block';
             // Load chat history
@@ -51,6 +56,8 @@ function handleServerMessage(data) {
             }
             renderBoard();
             updateTurnInfo();
+            // Clear opponent disconnect status
+            clearOpponentStatus();
             console.log('Successfully rejoined game');
             break;
         case 'GAME_START':
@@ -116,6 +123,12 @@ function handleServerMessage(data) {
             break;
         case 'TAKE_BACK':
             handleTakeBack(data);
+            break;
+        case 'OPPONENT_DISCONNECTED':
+            handleOpponentDisconnected(data);
+            break;
+        case 'OPPONENT_RECONNECTED':
+            handleOpponentReconnected(data);
             break;
     }
 }
@@ -328,4 +341,32 @@ function handleTakeBack(data) {
     updateTurnInfo();
     // Play sound
     AudioManager.playMove();
+}
+
+function handleOpponentDisconnected(data) {
+    // Show disconnect status for opponent
+    const opponentColor = data.playerColor;
+    const opponentName = opponentColor === 'RED' ? '红方' : '黑方';
+    showOpponentStatus(`${opponentName}已断开连接`);
+}
+
+function handleOpponentReconnected(data) {
+    // Clear disconnect status when opponent reconnects
+    clearOpponentStatus();
+}
+
+function showOpponentStatus(message) {
+    const statusDiv = document.getElementById('opponentStatus');
+    if (statusDiv) {
+        statusDiv.textContent = message;
+        statusDiv.style.display = 'block';
+    }
+}
+
+function clearOpponentStatus() {
+    const statusDiv = document.getElementById('opponentStatus');
+    if (statusDiv) {
+        statusDiv.textContent = '';
+        statusDiv.style.display = 'none';
+    }
 }

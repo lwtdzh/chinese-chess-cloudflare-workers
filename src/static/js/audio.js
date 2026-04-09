@@ -128,7 +128,7 @@ const AudioManager = {
         if (this.bgMusicOscillators.length > 0) return; // Already playing
 
         this.bgMusicGain = this.context.createGain();
-        this.bgMusicGain.gain.value = 0.08;
+        this.bgMusicGain.gain.value = 0.25;
         this.bgMusicGain.connect(this.masterGain);
 
         // Create a simple pentatonic ambient sound
