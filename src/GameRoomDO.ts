@@ -561,6 +561,22 @@ export class GameRoomDO implements DurableObject {
     this.connections.delete(ws);
 
     // Notify opponent of disconnect
+    this.notifyOpponentDisconnect(connection);
+
+    console.log(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
+  }
+
+  async webSocketError(ws: WebSocket, error: any): Promise<void> {
+    const connection = this.connections.get(ws);
+    this.connections.delete(ws);
+
+    // Notify opponent of disconnect (error also means disconnect)
+    this.notifyOpponentDisconnect(connection);
+
+    console.error(`WebSocket error:`, error);
+  }
+
+  private notifyOpponentDisconnect(connection: Connection | undefined): void {
     if (connection && this.gameState === GameState.PLAYING) {
       const playerId = connection.playerId;
       const playerColor = this.getPlayerColor(playerId);
@@ -572,12 +588,5 @@ export class GameRoomDO implements DurableObject {
         });
       }
     }
-
-    console.log(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
-  }
-
-  async webSocketError(ws: WebSocket, error: any): Promise<void> {
-    this.connections.delete(ws);
-    console.error(`WebSocket error:`, error);
   }
 }

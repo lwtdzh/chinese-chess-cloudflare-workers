@@ -152,16 +152,26 @@ function deserializeBoard(boardData) {
 }
 
 function applyMove(data) {
-    console.log('[GAME] applyMove called, piece at from:', gameState.board[data.from.row][data.from.col]);
+    console.log('[GAME] applyMove called');
+    console.log('[GAME]   from:', data.from, 'to:', data.to);
+    console.log('[GAME]   nextTurn:', data.nextTurn);
+    console.log('[GAME]   myColor:', gameState.myColor);
+    console.log('[GAME]   currentTurn BEFORE:', gameState.currentTurn);
+
     const piece = gameState.board[data.from.row][data.from.col];
     gameState.board[data.from.row][data.from.col] = null;
     gameState.board[data.to.row][data.to.col] = piece;
     gameState.currentTurn = data.nextTurn;
+
+    console.log('[GAME]   currentTurn AFTER:', gameState.currentTurn);
+
     gameState.selectedPiece = null;
     gameState.validMoves = [];
 
     renderBoard();
     updateTurnInfo();
+
+    console.log('[GAME]   turnInfo text:', document.getElementById('turnInfo').textContent);
 
     // Play move sound
     AudioManager.playMove();

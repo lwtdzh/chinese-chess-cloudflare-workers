@@ -35,13 +35,33 @@ async function setupTwoPlayerGame(browser: any): Promise<{ page1: Page; page2: P
 
   const roomName = 'LongTest_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
 
+  // Capture console messages for debugging
+  const p1Logs: string[] = [];
+  const p2Logs: string[] = [];
+
+  page1.on('console', msg => {
+    const text = msg.text();
+    if (text.includes('[GAME]') || text.includes('[WS]') || text.includes('ISSUE')) {
+      p1Logs.push(`P1: ${text}`);
+      console.log(`P1: ${text}`);
+    }
+  });
+
+  page2.on('console', msg => {
+    const text = msg.text();
+    if (text.includes('[GAME]') || text.includes('[WS]') || text.includes('ISSUE')) {
+      p2Logs.push(`P2: ${text}`);
+      console.log(`P2: ${text}`);
+    }
+  });
+
   // Player 1 creates room
   await page1.goto(BASE_URL);
   await page1.waitForFunction(() => window.isWebSocketConnected && window.isWebSocketConnected(), { timeout: 20000 });
   await page1.fill('#roomName', roomName);
   await page1.click('#createBtn');
   await page1.waitForSelector('#game', { timeout: 15000 });
-  await page1.waitForTimeout(1500);
+  await page1.waitForTimeout(2000);
 
   // Player 2 joins room
   await page2.goto(BASE_URL);
@@ -49,7 +69,7 @@ async function setupTwoPlayerGame(browser: any): Promise<{ page1: Page; page2: P
   await page2.fill('#roomName', roomName);
   await page2.click('#joinBtn');
   await page2.waitForSelector('#game', { timeout: 15000 });
-  await page2.waitForTimeout(2000);
+  await page2.waitForTimeout(3000);
 
   return { page1, page2, roomName };
 }
@@ -224,9 +244,11 @@ test('Long running comprehensive game test', async ({ browser }) => {
 
     // Make the move
     await clickBoardSquare(activePage, move.from.row, move.from.col);
-    await activePage.waitForTimeout(300);
+    await activePage.waitForTimeout(500);
     await clickBoardSquare(activePage, move.to.row, move.to.col);
-    await activePage.waitForTimeout(2000); // Longer wait for move to process
+
+    // Wait longer for move to be processed and propagated
+    await activePage.waitForTimeout(3000);
 
     // Check turn info AFTER move for the player who just moved
     const turnInfoAfter = await activePage.locator('#turnInfo').textContent();
