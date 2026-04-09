@@ -9,6 +9,9 @@ let gameState = {
     isPlaying: false
 };
 
+// Expose gameState for testing
+window.gameState = gameState;
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 
