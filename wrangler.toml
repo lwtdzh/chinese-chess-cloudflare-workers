@@ -1,0 +1,17 @@
+name = "chinese-chess"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[durable_objects]
+bindings = [{ name = "GAME_ROOM", class_name = "GameRoomDO" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoomDO"]
+
+[assets]
+directory = "./src/static"
+
+[[routes]]
+pattern = "chess.netlib.re/*"
+zone_name = "chess.netlib.re"
