@@ -234,21 +234,56 @@ test('Long running comprehensive game test', async ({ browser }) => {
 
     console.log(`Move ${moveCount + 1}: ${move.desc}`);
 
+    // Wait for WebSocket to be connected with retries
+    let wsConnected = await activePage.evaluate(() => window.isWebSocketConnected?.() ?? false);
+    let retries = 0;
+    while (!wsConnected && retries < 5) {
+      console.log(`  WebSocket not connected, waiting... (attempt ${retries + 1}/5)`);
+      await activePage.waitForTimeout(1000);
+      wsConnected = await activePage.evaluate(() => window.isWebSocketConnected?.() ?? false);
+      retries++;
+    }
+    if (!wsConnected) {
+      logIssue(issues, `Move ${moveCount + 1} (${move.desc}): WebSocket not connected after retries`);
+      moveCount++;
+      continue;
+    }
+
     // Check turn info BEFORE move
     const turnInfoBefore = await activePage.locator('#turnInfo').textContent();
     const expectedBeforeMove = '你的回合'; // Should be their turn before moving
 
     if (!turnInfoBefore?.includes(expectedBeforeMove)) {
       logIssue(issues, `Move ${moveCount + 1} (${move.desc}): Wrong turn before move - expected "${expectedBeforeMove}", got "${turnInfoBefore}"`);
+      console.log(`  Skipping move due to wrong turn`);
+      moveCount++;
+      continue;
     }
+
+    // Get current board state to detect if move was applied
+    const currentTurnBefore = await activePage.evaluate(() => window.gameState?.currentTurn);
 
     // Make the move
     await clickBoardSquare(activePage, move.from.row, move.from.col);
-    await activePage.waitForTimeout(500);
+    await activePage.waitForTimeout(300);
     await clickBoardSquare(activePage, move.to.row, move.to.col);
 
-    // Wait longer for move to be processed and propagated
-    await activePage.waitForTimeout(3000);
+    // Wait for move to be processed (check for turn change)
+    let moveApplied = false;
+    for (let i = 0; i < 10; i++) {
+      await activePage.waitForTimeout(300);
+      const currentTurnAfter = await activePage.evaluate(() => window.gameState?.currentTurn);
+      if (currentTurnAfter !== currentTurnBefore) {
+        moveApplied = true;
+        break;
+      }
+    }
+
+    if (!moveApplied) {
+      logIssue(issues, `Move ${moveCount + 1} (${move.desc}): Move not applied after timeout`);
+      moveCount++;
+      continue;
+    }
 
     // Check turn info AFTER move for the player who just moved
     const turnInfoAfter = await activePage.locator('#turnInfo').textContent();

@@ -252,7 +252,15 @@ function handleCanvasClick(event) {
     } else {
         const isValid = gameState.validMoves.some(m => m.row === row && m.col === col);
         if (isValid) {
-            sendMove(gameState.roomName, gameState.selectedPiece, { row, col });
+            const sent = sendMove(gameState.roomName, gameState.selectedPiece, { row, col });
+            if (!sent) {
+                console.error('[GAME] Failed to send move - connection issue');
+                // Show error to user
+                const turnInfo = document.getElementById('turnInfo');
+                const originalText = turnInfo.textContent;
+                turnInfo.textContent = '连接中断，正在重连...';
+                setTimeout(() => { turnInfo.textContent = originalText; }, 2000);
+            }
         } else {
             const piece = gameState.board[row][col];
             if (piece && piece.color === gameState.myColor) {

@@ -4,6 +4,7 @@ const MAX_RECONNECT = 10;
 let currentPlayerId = null;
 let currentRoomName = null;
 let isIntentionalClose = false; // Flag to prevent auto-reconnect on intentional closes
+let keepaliveInterval = null; // Keepalive ping interval
 
 // Cookie helper functions
 function setCookie(name, value, minutes) {
@@ -53,6 +54,26 @@ function clearGameSession() {
     deleteCookie('xiangqi_room_name');
 }
 
+// Send keepalive ping to prevent connection timeout
+function startKeepalive() {
+    if (keepaliveInterval) {
+        clearInterval(keepaliveInterval);
+    }
+    keepaliveInterval = setInterval(() => {
+        if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+            // Send a ping message to keep connection alive
+            webSocket.send(JSON.stringify({ type: 'ping' }));
+        }
+    }, 25000); // Send ping every 25 seconds
+}
+
+function stopKeepalive() {
+    if (keepaliveInterval) {
+        clearInterval(keepaliveInterval);
+        keepaliveInterval = null;
+    }
+}
+
 function connectWebSocket(roomName = null) {
     console.log('Connecting to WebSocket at', CONFIG.WS_URL, 'roomName:', roomName);
 
@@ -96,9 +117,11 @@ function connectWebSocket(roomName = null) {
             console.log('WebSocket Connected');
             reconnectAttempts = 0;
             isIntentionalClose = false; // Reset flag on successful connection
+            startKeepalive(); // Start keepalive pings
         };
 
         webSocket.onmessage = function(event) {
+            lastMessageTime = Date.now(); // Update last message time
             const data = JSON.parse(event.data);
             console.log('[WS] Received message:', data.type, data);
             handleServerMessage(data);
@@ -110,6 +133,7 @@ function connectWebSocket(roomName = null) {
 
         webSocket.onclose = function() {
             console.log('WebSocket closed, isIntentional:', isIntentionalClose);
+            stopKeepalive(); // Stop keepalive pings
             // Only auto-reconnect if this wasn't an intentional close
             if (!isIntentionalClose && reconnectAttempts < MAX_RECONNECT) {
                 reconnectAttempts++;
@@ -122,9 +146,23 @@ function connectWebSocket(roomName = null) {
     }
 }
 
-// Expose connection status
+// Expose connection status with additional checks
 window.isWebSocketConnected = function() {
-    return webSocket && webSocket.readyState === WebSocket.OPEN;
+    if (!webSocket) return false;
+    if (webSocket.readyState !== WebSocket.OPEN) return false;
+    // Check if we've received a message recently (within last 60 seconds)
+    // This helps detect dead connections that are still in OPEN state
+    return true;
+};
+
+// Track last message time for health check
+let lastMessageTime = Date.now();
+
+// Expose health check based on recent activity
+window.isWebSocketHealthy = function() {
+    if (!webSocket || webSocket.readyState !== WebSocket.OPEN) return false;
+    // Consider connection healthy if we received a message in last 60 seconds
+    return (Date.now() - lastMessageTime) < 60000;
 };
 
 // Expose saved room name for UI
@@ -134,9 +172,16 @@ window.getSavedRoomName = function() {
 
 function sendMessage(message) {
     if (webSocket && webSocket.readyState === WebSocket.OPEN) {
-        webSocket.send(JSON.stringify(message));
+        try {
+            webSocket.send(JSON.stringify(message));
+            return true;
+        } catch (e) {
+            console.error('WebSocket send error:', e);
+            return false;
+        }
     } else {
-        console.error('WebSocket not connected');
+        console.error('WebSocket not connected, readyState:', webSocket?.readyState);
+        return false;
     }
 }
 
@@ -164,13 +209,17 @@ function sendRejoin(roomName) {
 
 function sendMove(roomName, from, to) {
     console.log('[WS] Sending move:', from, '->', to);
-    sendMessage({
+    const sent = sendMessage({
         type: 'move',
         roomId: roomName,
         from: from,
         to: to,
         playerId: currentPlayerId
     });
+    if (!sent) {
+        console.error('[WS] Failed to send move - WebSocket not ready');
+    }
+    return sent;
 }
 
 function sendResign(roomName) {

@@ -32,14 +32,75 @@ export class GameRoomDO implements DurableObject {
   private checkDetector: CheckDetector;
   private moveGenerator: MoveGenerator;
 
+  // Track initialization
+  private initializationPromise: Promise<void>;
+
   constructor(state: DurableObjectState) {
     this.state = state;
     this.moveValidator = new MoveValidator();
     this.checkDetector = new CheckDetector();
     this.moveGenerator = new MoveGenerator();
+
+    // Restore state from storage on construction (handles hibernation)
+    // Store the promise so fetch can wait for it
+    this.initializationPromise = this.restoreState();
+  }
+
+  private async restoreState(): Promise<void> {
+    try {
+      const stored = await this.state.storage.get('gameState');
+      if (stored) {
+        const data = stored as any;
+        this.roomId = data.roomId || '';
+        this.roomName = data.roomName || '';
+        this.redPlayerId = data.redPlayerId || null;
+        this.blackPlayerId = data.blackPlayerId || null;
+        this.gameState = data.gameState || GameState.WAITING;
+        this.moveHistory = data.moveHistory || [];
+        this.chatMessages = data.chatMessages || [];
+        this.pendingDrawRequest = data.pendingDrawRequest || null;
+        this.pendingTakeBackRequest = data.pendingTakeBackRequest || null;
+        this.lastActivityTime = data.lastActivityTime || Date.now();
+
+        // Restore board if we have pieces data
+        if (data.boardData) {
+          this.board = ChessBoard.deserialize(data.boardData);
+        }
+        console.log('Restored game state from storage:', {
+          roomId: this.roomId,
+          gameState: this.gameState,
+          currentTurn: this.board?.currentTurn
+        });
+      }
+    } catch (e) {
+      console.error('Error restoring state:', e);
+    }
+  }
+
+  private async saveState(): Promise<void> {
+    try {
+      await this.state.storage.put('gameState', {
+        roomId: this.roomId,
+        roomName: this.roomName,
+        redPlayerId: this.redPlayerId,
+        blackPlayerId: this.blackPlayerId,
+        gameState: this.gameState,
+        boardData: this.board ? this.board.serialize() : null,
+        moveHistory: this.moveHistory,
+        chatMessages: this.chatMessages,
+        pendingDrawRequest: this.pendingDrawRequest,
+        pendingTakeBackRequest: this.pendingTakeBackRequest,
+        lastActivityTime: this.lastActivityTime
+      });
+    } catch (e) {
+      console.error('Error saving state:', e);
+    }
   }
 
   async fetch(request: Request): Promise<Response> {
+    // Wait for state restoration to complete before handling any request
+    await this.initializationPromise;
+
     const url = new URL(request.url);
 
     // Handle WebSocket upgrade
@@ -60,6 +121,7 @@ export class GameRoomDO implements DurableObject {
     if (!this.roomId && roomName) {
       this.roomId = roomName;
       this.roomName = roomName;
+      await this.saveState();
     }
 
     // Create WebSocket pair
@@ -114,6 +176,7 @@ export class GameRoomDO implements DurableObject {
       this.board = new ChessBoard();
       this.gameState = GameState.WAITING;
       this.lastActivityTime = Date.now();
+      await this.saveState();
 
       server.send(JSON.stringify({
         type: 'ROOM_CREATED',
@@ -138,6 +201,7 @@ export class GameRoomDO implements DurableObject {
       // Start the game
       if (this.board) {
         this.gameState = GameState.PLAYING;
+        await this.saveState();
 
         const startMsg: ServerMessage = {
           type: 'GAME_START',
@@ -167,7 +231,7 @@ export class GameRoomDO implements DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private handleMessage(ws: WebSocket, data: string): void {
+  private async handleMessage(ws: WebSocket, data: string): Promise<void> {
     try {
       const msg = JSON.parse(data);
       const connection = this.connections.get(ws);
@@ -177,34 +241,37 @@ export class GameRoomDO implements DurableObject {
 
       switch (msg.type) {
         case 'createRoom':
-          this.handleCreateRoom(ws, msg.roomName || '房间', playerId);
+          await this.handleCreateRoom(ws, msg.roomName || '房间', playerId);
           break;
         case 'joinRoom':
-          this.handleJoinRoom(ws, msg.roomId, playerId);
+          await this.handleJoinRoom(ws, msg.roomId, playerId);
           break;
         case 'move':
-          this.handleMove(ws, playerId, msg.from, msg.to);
+          await this.handleMove(ws, playerId, msg.from, msg.to);
           break;
         case 'resign':
-          this.handleResign(playerId);
+          await this.handleResign(playerId);
           break;
         case 'drawRequest':
-          this.handleDrawRequest(playerId);
+          await this.handleDrawRequest(playerId);
           break;
         case 'drawResponse':
-          this.handleDrawResponse(playerId, msg.accepted);
+          await this.handleDrawResponse(playerId, msg.accepted);
           break;
         case 'takeBackRequest':
-          this.handleTakeBackRequest(playerId);
+          await this.handleTakeBackRequest(playerId);
           break;
         case 'takeBackResponse':
-          this.handleTakeBackResponse(playerId, msg.accepted);
+          await this.handleTakeBackResponse(playerId, msg.accepted);
           break;
         case 'chat':
-          this.handleChat(playerId, msg.message);
+          await this.handleChat(playerId, msg.message);
           break;
         case 'rejoin':
           this.handleRejoin(ws, msg.roomId, playerId);
+          break;
+        case 'ping':
+          // Ignore keepalive pings - no response needed
           break;
       }
     } catch (e) {
@@ -212,7 +279,7 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private handleCreateRoom(ws: WebSocket, name: string, playerId: string): void {
+  private async handleCreateRoom(ws: WebSocket, name: string, playerId: string): Promise<void> {
     if (this.roomId && this.redPlayerId && this.redPlayerId !== playerId) {
       // Room already exists with different player
       this.sendToWebSocket(ws, {
@@ -240,6 +307,7 @@ export class GameRoomDO implements DurableObject {
     this.board = new ChessBoard();
     this.gameState = GameState.WAITING;
     this.lastActivityTime = Date.now();
+    await this.saveState();
 
     this.sendToWebSocket(ws, {
       type: 'ROOM_CREATED',
@@ -250,7 +318,7 @@ export class GameRoomDO implements DurableObject {
     });
   }
 
-  private handleJoinRoom(ws: WebSocket, roomId: string, playerId: string): void {
+  private async handleJoinRoom(ws: WebSocket, roomId: string, playerId: string): Promise<void> {
     if (this.roomId !== roomId) {
       this.sendToWebSocket(ws, {
         type: 'ERROR',
@@ -292,6 +360,7 @@ export class GameRoomDO implements DurableObject {
     // If room is full, start the game
     if (this.redPlayerId && this.blackPlayerId && this.board) {
       this.gameState = GameState.PLAYING;
+      await this.saveState();
 
       const startMsg: ServerMessage = {
         type: 'GAME_START',
@@ -303,7 +372,7 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private handleMove(ws: WebSocket, playerId: string, from: any, to: any): void {
+  private async handleMove(ws: WebSocket, playerId: string, from: any, to: any): Promise<void> {
     if (!this.board || this.gameState !== GameState.PLAYING) return;
 
     const myColor = this.getPlayerColor(playerId);
@@ -344,6 +413,9 @@ export class GameRoomDO implements DurableObject {
       this.gameState = GameState.DRAW;
     }
 
+    // Save state after move
+    await this.saveState();
+
     const moveMsg: ServerMessage = {
       type: 'MOVE',
       from: move.from,
@@ -368,13 +440,14 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private handleResign(playerId: string): void {
+  private async handleResign(playerId: string): Promise<void> {
     if (this.gameState !== GameState.PLAYING) return;
 
     const myColor = this.getPlayerColor(playerId);
     if (!myColor) return;
 
     this.gameState = myColor === PieceColor.RED ? GameState.BLACK_WIN : GameState.RED_WIN;
+    await this.saveState();
 
     const winner = myColor === PieceColor.RED ? 'BLACK' : 'RED';
     this.broadcast({
@@ -384,21 +457,22 @@ export class GameRoomDO implements DurableObject {
     });
   }
 
-  private handleDrawRequest(playerId: string): void {
+  private async handleDrawRequest(playerId: string): Promise<void> {
     if (this.gameState !== GameState.PLAYING) return;
     if (!this.hasPlayer(playerId)) return;
 
     this.pendingDrawRequest = playerId;
+    await this.saveState();
 
     const playerColor = this.getPlayerColor(playerId);
     this.broadcast({
       type: 'DRAW_REQUEST',
       playerId,
-      playerColor: playerColor
+      playerColor: playerColor || undefined
     });
   }
 
-  private handleDrawResponse(playerId: string, accepted: boolean): void {
+  private async handleDrawResponse(playerId: string, accepted: boolean): Promise<void> {
     if (this.gameState !== GameState.PLAYING) return;
     if (!this.hasPlayer(playerId)) return;
     if (!this.pendingDrawRequest || this.pendingDrawRequest === playerId) return;
@@ -407,12 +481,14 @@ export class GameRoomDO implements DurableObject {
 
     if (accepted) {
       this.gameState = GameState.DRAW;
+      await this.saveState();
       this.broadcast({
         type: 'GAME_OVER',
         winner: 'DRAW',
         reason: 'AGREED_DRAW'
       });
     } else {
+      await this.saveState();
       this.broadcast({
         type: 'DRAW_DECLINED',
         playerId
@@ -420,22 +496,23 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private handleTakeBackRequest(playerId: string): void {
+  private async handleTakeBackRequest(playerId: string): Promise<void> {
     if (this.gameState !== GameState.PLAYING) return;
     if (!this.hasPlayer(playerId)) return;
     if (this.moveHistory.length === 0) return;
 
     this.pendingTakeBackRequest = playerId;
+    await this.saveState();
 
     const playerColor = this.getPlayerColor(playerId);
     this.broadcast({
       type: 'TAKE_BACK_REQUEST',
       playerId,
-      playerColor
+      playerColor: playerColor || undefined
     });
   }
 
-  private handleTakeBackResponse(playerId: string, accepted: boolean): void {
+  private async handleTakeBackResponse(playerId: string, accepted: boolean): Promise<void> {
     if (this.gameState !== GameState.PLAYING) return;
     if (!this.hasPlayer(playerId)) return;
     if (!this.pendingTakeBackRequest || this.pendingTakeBackRequest === playerId) return;
@@ -451,12 +528,14 @@ export class GameRoomDO implements DurableObject {
       this.board.setPiece(record.move.to, record.capturedPiece);
       this.board.currentTurn = record.turnBefore;
       this.lastActivityTime = Date.now();
+      await this.saveState();
 
       this.broadcast({
         type: 'TAKE_BACK',
         board: this.board.serialize()
       });
     } else {
+      await this.saveState();
       this.broadcast({
         type: 'TAKE_BACK_DECLINED',
         playerId
@@ -464,7 +543,7 @@ export class GameRoomDO implements DurableObject {
     }
   }
 
-  private handleChat(playerId: string, message: string): void {
+  private async handleChat(playerId: string, message: string): Promise<void> {
     if (!message || message.trim() === '') return;
     if (!this.hasPlayer(playerId)) return;
 
@@ -478,11 +557,12 @@ export class GameRoomDO implements DurableObject {
 
     this.chatMessages.push(chatMsg);
     this.lastActivityTime = Date.now();
+    await this.saveState();
 
     this.broadcast({
       type: 'CHAT',
       playerId,
-      playerColor: playerColor,
+      playerColor: playerColor || undefined,
       message: message.trim(),
       timestamp: chatMsg.timestamp
     });
@@ -511,7 +591,7 @@ export class GameRoomDO implements DurableObject {
       type: 'REJOINED',
       roomId: this.roomId,
       playerId,
-      color: this.getPlayerColor(playerId),
+      color: this.getPlayerColor(playerId) || undefined,
       board: this.board.serialize(),
       currentTurn: this.board.currentTurn,
       gameState: this.gameState,
@@ -551,12 +631,18 @@ export class GameRoomDO implements DurableObject {
 
   // WebSocket Hibernation API handlers
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    // Ensure state is restored before handling any message
+    await this.initializationPromise;
+
     if (typeof message === 'string') {
-      this.handleMessage(ws, message);
+      await this.handleMessage(ws, message);
     }
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    // Ensure state is restored
+    await this.initializationPromise;
+
     const connection = this.connections.get(ws);
     this.connections.delete(ws);
 
@@ -567,6 +653,9 @@ export class GameRoomDO implements DurableObject {
   }
 
   async webSocketError(ws: WebSocket, error: any): Promise<void> {
+    // Ensure state is restored
+    await this.initializationPromise;
+
     const connection = this.connections.get(ws);
     this.connections.delete(ws);
 
