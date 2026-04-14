@@ -73,6 +73,8 @@ function handleServerMessage(data) {
             document.getElementById('roomInfo').textContent = `房间: ${gameState.roomName || data.roomId}`;
             document.getElementById('lobby').style.display = 'none';
             document.getElementById('game').style.display = 'block';
+            // Hide restart button when new game starts
+            hideRestartButton();
             renderBoard();
             updateTurnInfo();
             // Start background music on game start
@@ -97,6 +99,8 @@ function handleServerMessage(data) {
             } else {
                 resultMsg = '你输了!';
             }
+            // Show restart button
+            showRestartButton();
             alert(`游戏结束! ${resultMsg} (${data.reason})`);
             break;
         case 'ERROR':
@@ -187,6 +191,8 @@ function applyMove(data) {
     if (data.gameState !== 'PLAYING') {
         gameState.isPlaying = false;
         clearGameSession();
+        // Show restart button
+        showRestartButton();
         // Play game over sound
         const isWin = data.winner === gameState.myColor;
         AudioManager.playGameOver(isWin);
@@ -392,5 +398,26 @@ function clearOpponentStatus() {
     if (statusDiv) {
         statusDiv.textContent = '';
         statusDiv.style.display = 'none';
+    }
+}
+
+// Restart button functions
+function showRestartButton() {
+    const restartBtn = document.getElementById('restartBtn');
+    if (restartBtn) {
+        restartBtn.style.display = 'inline-block';
+    }
+}
+
+function hideRestartButton() {
+    const restartBtn = document.getElementById('restartBtn');
+    if (restartBtn) {
+        restartBtn.style.display = 'none';
+    }
+}
+
+function restartGame() {
+    if (gameState.roomName) {
+        sendRestartGame(gameState.roomName);
     }
 }

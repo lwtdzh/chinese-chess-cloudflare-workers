@@ -148,6 +148,14 @@ canvas {
     background: #D32F2F;
 }
 
+#restartBtn {
+    background: #9C27B0;
+}
+
+#restartBtn:hover {
+    background: #7B1FA2;
+}
+
 .audio-controls {
     margin: 10px 0;
     display: flex;

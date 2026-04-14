@@ -272,3 +272,11 @@ function sendTakeBackResponse(roomName, accepted) {
         accepted: accepted
     });
 }
+
+function sendRestartGame(roomName) {
+    sendMessage({
+        type: 'restartGame',
+        roomId: roomName,
+        playerId: currentPlayerId
+    });
+}

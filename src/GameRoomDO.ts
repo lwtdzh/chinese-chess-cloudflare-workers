@@ -270,6 +270,9 @@ export class GameRoomDO implements DurableObject {
         case 'rejoin':
           this.handleRejoin(ws, msg.roomId, playerId);
           break;
+        case 'restartGame':
+          await this.handleRestartGame(playerId);
+          break;
         case 'ping':
           // Ignore keepalive pings - no response needed
           break;
@@ -597,6 +600,40 @@ export class GameRoomDO implements DurableObject {
       gameState: this.gameState,
       chatHistory: this.chatMessages
     });
+  }
+
+  private async handleRestartGame(playerId: string): Promise<void> {
+    // Only allow restart if game has ended (not PLAYING or WAITING)
+    if (this.gameState === GameState.PLAYING || this.gameState === GameState.WAITING) {
+      return;
+    }
+
+    // Only allow players in the room to restart
+    if (!this.hasPlayer(playerId)) {
+      return;
+    }
+
+    // Reset the board and game state
+    this.board = new ChessBoard();
+    this.gameState = GameState.PLAYING;
+    this.moveHistory = [];
+    this.pendingDrawRequest = null;
+    this.pendingTakeBackRequest = null;
+    this.lastActivityTime = Date.now();
+
+    // Keep the same players and chat messages (optional - clear chat or keep it)
+    // Let's keep chat messages for continuity
+
+    await this.saveState();
+
+    // Broadcast game restart to all players
+    const startMsg: ServerMessage = {
+      type: 'GAME_START',
+      roomId: this.roomId,
+      board: this.board.serialize()
+    };
+
+    this.broadcast(startMsg);
   }
 
   private getPlayerColor(playerId: string): PieceColor | null {
